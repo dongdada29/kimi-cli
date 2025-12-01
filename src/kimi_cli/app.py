@@ -92,6 +92,20 @@ class KimiCLI:
         assert model is not None
         env_overrides = augment_provider_with_env_vars(provider, model)
 
+        # 检查并验证模式列表（如果设置了环境变量）
+        from kimi_cli.llm import get_available_models_from_env
+
+        available_models = get_available_models_from_env()
+        if available_models:
+            logger.info("Available models from environment: {models}", models=available_models)
+            # 如果指定了模型名称，验证它是否在可用列表中
+            if model.model and model.model not in available_models:
+                logger.warning(
+                    "Model {model} is not in the available models list: {available}",
+                    model=model.model,
+                    available=available_models,
+                )
+
         if not provider.base_url or not model.model:
             llm = None
         else:

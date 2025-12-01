@@ -213,8 +213,24 @@ async def load_agent(
 def _load_system_prompt(
     path: Path, args: dict[str, str], builtin_args: BuiltinSystemPromptArgs
 ) -> str:
-    logger.info("Loading system prompt: {path}", path=path)
-    system_prompt = path.read_text(encoding="utf-8").strip()
+    import os
+
+    # 优先检查环境变量 KIMI_SYSTEM_PROMPT（直接提供提示词内容）
+    if env_prompt := os.getenv("KIMI_SYSTEM_PROMPT"):
+        logger.info("Loading system prompt from KIMI_SYSTEM_PROMPT environment variable")
+        system_prompt = env_prompt
+    # 其次检查环境变量 KIMI_SYSTEM_PROMPT_FILE（从文件路径加载）
+    elif env_prompt_file := os.getenv("KIMI_SYSTEM_PROMPT_FILE"):
+        logger.info("Loading system prompt from file: {file}", file=env_prompt_file)
+        prompt_path = Path(env_prompt_file)
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"System prompt file not found: {env_prompt_file}")
+        system_prompt = prompt_path.read_text(encoding="utf-8").strip()
+    # 最后使用默认路径
+    else:
+        logger.info("Loading system prompt: {path}", path=path)
+        system_prompt = path.read_text(encoding="utf-8").strip()
+
     logger.debug(
         "Substituting system prompt with builtin args: {builtin_args}, spec args: {spec_args}",
         builtin_args=builtin_args,
@@ -270,6 +286,92 @@ def _load_tool(tool_path: str, dependencies: dict[type[Any], Any]) -> ToolType |
     return cls(*args)
 
 
+def _filter_mcp_configs_by_env(mcp_configs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter MCP configs based on environment variables.
+
+    Environment variables:
+    - KIMI_MCP_ENABLED: Enable/disable MCP tools (default: true)
+    - KIMI_MCP_SERVERS: Comma-separated list of server names to enable (if set, only these are enabled)
+    - KIMI_MCP_DISABLED: Comma-separated list of server names to disable
+
+    Returns:
+        Filtered list of MCP configs.
+    """
+    import os
+
+    # 检查是否全局禁用 MCP
+    mcp_enabled = os.getenv("KIMI_MCP_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+    if not mcp_enabled:
+        logger.info("MCP tools are disabled via KIMI_MCP_ENABLED environment variable")
+        return []
+
+    # 获取要启用的服务器列表
+    enabled_servers_str = os.getenv("KIMI_MCP_SERVERS", "")
+    enabled_servers: set[str] | None = None
+    if enabled_servers_str:
+        enabled_servers = {s.strip() for s in enabled_servers_str.split(",") if s.strip()}
+        logger.info("MCP servers whitelist from KIMI_MCP_SERVERS: {servers}", servers=enabled_servers)
+
+    # 获取要禁用的服务器列表
+    disabled_servers_str = os.getenv("KIMI_MCP_DISABLED", "")
+    disabled_servers: set[str] = set()
+    if disabled_servers_str:
+        disabled_servers = {s.strip() for s in disabled_servers_str.split(",") if s.strip()}
+        logger.info("MCP servers blacklist from KIMI_MCP_DISABLED: {servers}", servers=disabled_servers)
+
+    # 如果没有设置过滤条件，返回所有配置
+    if enabled_servers is None and not disabled_servers:
+        return mcp_configs
+
+    filtered_configs: list[dict[str, Any]] = []
+    for mcp_config in mcp_configs:
+        # 处理配置格式 {"mcpServers": {"server_name": {...}}}
+        if "mcpServers" in mcp_config:
+            filtered_servers: dict[str, Any] = {}
+            for server_name, server_config in mcp_config["mcpServers"].items():
+                # 如果在禁用列表中，跳过
+                if server_name in disabled_servers:
+                    logger.info("Skipping MCP server {name} (disabled via KIMI_MCP_DISABLED)", name=server_name)
+                    continue
+
+                # 如果设置了启用列表且不在列表中，跳过
+                if enabled_servers is not None and server_name not in enabled_servers:
+                    logger.info(
+                        "Skipping MCP server {name} (not in KIMI_MCP_SERVERS whitelist)",
+                        name=server_name,
+                    )
+                    continue
+
+                filtered_servers[server_name] = server_config
+
+            # 如果还有服务器，添加过滤后的配置
+            if filtered_servers:
+                filtered_config = mcp_config.copy()
+                filtered_config["mcpServers"] = filtered_servers
+                filtered_configs.append(filtered_config)
+        else:
+            # 对于其他格式的配置，尝试从 name 字段获取服务器名称
+            server_name = mcp_config.get("name")
+            if server_name:
+                # 如果在禁用列表中，跳过
+                if server_name in disabled_servers:
+                    logger.info("Skipping MCP server {name} (disabled via KIMI_MCP_DISABLED)", name=server_name)
+                    continue
+
+                # 如果设置了启用列表且不在列表中，跳过
+                if enabled_servers is not None and server_name not in enabled_servers:
+                    logger.info(
+                        "Skipping MCP server {name} (not in KIMI_MCP_SERVERS whitelist)",
+                        name=server_name,
+                    )
+                    continue
+
+            # 如果没有服务器名称或通过过滤，添加配置
+            filtered_configs.append(mcp_config)
+
+    return filtered_configs
+
+
 async def _load_mcp_tools(
     toolset: KimiToolset,
     mcp_configs: list[dict[str, Any]],
@@ -284,7 +386,10 @@ async def _load_mcp_tools(
 
     from kimi_cli.tools.mcp import MCPTool
 
-    for mcp_config in mcp_configs:
+    # 根据环境变量过滤 MCP 配置
+    filtered_configs = _filter_mcp_configs_by_env(mcp_configs)
+
+    for mcp_config in filtered_configs:
         logger.info("Loading MCP tools from: {mcp_config}", mcp_config=mcp_config)
         client = fastmcp.Client(mcp_config)
         async with client:

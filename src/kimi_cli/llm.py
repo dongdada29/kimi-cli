@@ -69,12 +69,53 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
         case "openai_legacy" | "openai_responses":
             if base_url := os.getenv("OPENAI_BASE_URL"):
                 provider.base_url = base_url
+                applied["OPENAI_BASE_URL"] = base_url
             if api_key := os.getenv("OPENAI_API_KEY"):
                 provider.api_key = SecretStr(api_key)
+                applied["OPENAI_API_KEY"] = "******"
+            if model_name := os.getenv("OPENAI_MODEL_NAME"):
+                model.model = model_name
+                applied["OPENAI_MODEL_NAME"] = model_name
+        case "anthropic":
+            if base_url := os.getenv("ANTHROPIC_BASE_URL"):
+                provider.base_url = base_url
+                applied["ANTHROPIC_BASE_URL"] = base_url
+            if api_key := os.getenv("ANTHROPIC_API_KEY"):
+                provider.api_key = SecretStr(api_key)
+                applied["ANTHROPIC_API_KEY"] = "******"
+            if model_name := os.getenv("ANTHROPIC_MODEL_NAME"):
+                model.model = model_name
+                applied["ANTHROPIC_MODEL_NAME"] = model_name
+        case "google_genai":
+            if base_url := os.getenv("GOOGLE_GENAI_BASE_URL"):
+                provider.base_url = base_url
+                applied["GOOGLE_GENAI_BASE_URL"] = base_url
+            if api_key := os.getenv("GOOGLE_GENAI_API_KEY"):
+                provider.api_key = SecretStr(api_key)
+                applied["GOOGLE_GENAI_API_KEY"] = "******"
+            if model_name := os.getenv("GOOGLE_GENAI_MODEL_NAME"):
+                model.model = model_name
+                applied["GOOGLE_GENAI_MODEL_NAME"] = model_name
         case _:
             pass
 
     return applied
+
+
+def get_available_models_from_env() -> list[str] | None:
+    """Get available model list from environment variables.
+
+    Returns:
+        List of available model names, or None if not set.
+    """
+    # 支持 KIMI_MODEL_LIST 或 KIMI_AVAILABLE_MODELS
+    model_list = os.getenv("KIMI_MODEL_LIST") or os.getenv("KIMI_AVAILABLE_MODELS")
+    if not model_list:
+        return None
+
+    # 支持逗号分隔的格式
+    models = [m.strip() for m in model_list.split(",") if m.strip()]
+    return models if models else None
 
 
 def create_llm(

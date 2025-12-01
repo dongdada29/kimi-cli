@@ -16,7 +16,7 @@ from kosong.chat_provider import (
     APITimeoutError,
     ThinkingEffort,
 )
-from kosong.message import ContentPart, Message
+from kosong.message import ContentPart, Message, TextPart
 from kosong.tooling import ToolResult
 from tenacity import RetryCallState, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
@@ -152,6 +152,38 @@ class KimiSoul:
     async def run(self, user_input: str | list[ContentPart]):
         if self._runtime.llm is None:
             raise LLMNotSet()
+
+        # 处理用户提示词的前缀和后缀（环境变量）
+        import os
+
+        user_prompt_prefix = os.getenv("KIMI_USER_PROMPT_PREFIX", "")
+        user_prompt_suffix = os.getenv("KIMI_USER_PROMPT_SUFFIX", "")
+
+        # 如果设置了前缀或后缀，需要增强用户输入
+        if user_prompt_prefix or user_prompt_suffix:
+            if isinstance(user_input, str):
+                enhanced_input = f"{user_prompt_prefix}{user_input}{user_prompt_suffix}"
+            else:
+                # 对于 ContentPart 列表，在第一个和最后一个文本部分添加前缀/后缀
+                enhanced_parts: list[ContentPart] = []
+                for i, part in enumerate(user_input):
+                    if isinstance(part, TextPart):
+                        if i == 0 and user_prompt_prefix:
+                            enhanced_parts.append(TextPart(text=user_prompt_prefix + part.text))
+                        elif i == len(user_input) - 1 and user_prompt_suffix:
+                            enhanced_parts.append(TextPart(text=part.text + user_prompt_suffix))
+                        else:
+                            enhanced_parts.append(part)
+                    else:
+                        enhanced_parts.append(part)
+                enhanced_input = enhanced_parts
+            user_input = enhanced_input
+            if user_prompt_prefix or user_prompt_suffix:
+                logger.debug(
+                    "Enhanced user prompt with prefix/suffix: prefix={prefix}, suffix={suffix}",
+                    prefix=user_prompt_prefix[:50] if user_prompt_prefix else "",
+                    suffix=user_prompt_suffix[:50] if user_prompt_suffix else "",
+                )
 
         user_message = Message(role="user", content=user_input)
         if missing_caps := check_message(user_message, self._runtime.llm.capabilities):

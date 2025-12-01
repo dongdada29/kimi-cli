@@ -116,13 +116,30 @@ class ACPAgent:
 
     async def setSessionModel(self, params: acp.SetSessionModelRequest) -> None:
         """Handle set session model request."""
-        logger.warning("Set session model: {model}", model=params.modelId)
+        logger.info("Set session model requested: {model}", model=params.modelId)
+        # Note: Changing model at runtime requires recreating the LLM and runtime,
+        # which is complex and may not be supported in the current architecture.
+        # For now, we log the request. Future implementations may support dynamic model switching.
+        if isinstance(self.soul, KimiSoul):
+            current_model = self.soul.model_name
+            if current_model != params.modelId:
+                logger.warning(
+                    "Model change requested from {current} to {new}, but runtime model switching is not yet supported. "
+                    "Current model {current} will continue to be used.",
+                    current=current_model,
+                    new=params.modelId,
+                )
+            else:
+                logger.debug("Model {model} is already in use", model=params.modelId)
 
     async def setSessionMode(
         self, params: acp.SetSessionModeRequest
     ) -> acp.SetSessionModeResponse | None:
         """Handle set session mode request."""
-        logger.warning("Set session mode: {mode}", mode=params.modeId)
+        logger.info("Set session mode requested: {mode}", mode=params.modeId)
+        # Note: Mode switching is not yet implemented in Kimi CLI.
+        # This is a placeholder for future mode support (e.g., "fast", "thorough", "creative").
+        logger.debug("Mode switching is not yet supported in Kimi CLI")
         return None
 
     async def extMethod(self, method: str, params: dict[str, Any]) -> dict[str, Any]:

@@ -63,7 +63,7 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
                 model.capabilities = set(
                     cast(ModelCapability, cap)
                     for cap in caps_lower
-                    if cap in get_args(ModelCapability)
+                    if cap in ALL_MODEL_CAPABILITIES
                 )
                 applied["KIMI_MODEL_CAPABILITIES"] = capabilities
         case "openai_legacy" | "openai_responses":
